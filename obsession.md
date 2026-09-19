@@ -1,4 +1,4 @@
-Writeup: Compromiso y Escalada de Privilegios en Entorno DockerLabs (IP: 172.17.0.3)
+Compromiso y Escalada de Privilegios en Entorno DockerLabs (IP: 172.17.0.3)
 Autor: Raúl Lozano Fernández
 Contacto: ralofe89@gmail.com
 Plataforma: DockerLabs
