@@ -1,4 +1,3 @@
-Writeup: The Aesthetic Dream (DockerLabs)
 Autor: Raúl Lozano Fernández
 Plataforma: DockerLabs
 Dificultad: Fácil
