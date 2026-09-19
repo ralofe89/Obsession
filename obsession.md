@@ -1,23 +1,69 @@
-# 🎯 DockerLabs CTF: The Aesthetic Dream
+Writeup: Compromiso y Escalada de Privilegios en Entorno DockerLabs (IP: 172.17.0.3)
+Autor: Raúl Lozano Fernández
+Contacto: ralofe89@gmail.com
+Plataforma: DockerLabs
 
-Este directorio contiene la documentación técnica y el proceso de explotación paso a paso de una máquina Linux vulnerable dentro del entorno de **DockerLabs**. 
+1. Resumen Ejecutivo
+Este documento detalla el proceso de auditoría de seguridad realizado sobre un objetivo Linux (172.17.0.3). La intrusión se logró encadenando una fuga de información en el código fuente web (Information Disclosure) con un ataque de fuerza bruta por diccionario, culminando en una escalada de privilegios a root explotando una mala configuración en los permisos de sudo asociados al editor de texto Vim.
 
-El objetivo de este proyecto es demostrar una metodología estructurada de pruebas de penetración (*pentesting*), combinando el análisis manual de vulnerabilidades web con técnicas automatizadas de fuerza bruta y escalada de privilegios local.
+2. Fase de Reconocimiento y Enumeración (Reconnaissance)
+La auditoría comenzó con un escaneo de puertos que reveló dos servicios clave expuestos:
 
-## 🛠️ Tecnologías y Herramientas Destacadas
+Puerto 22: SSH
 
-*   **Nmap:** Utilizado en la fase inicial de reconocimiento de red para la enumeración de puertos abiertos y servicios (SSH, HTTP).
-*   **Hydra:** Implementado para ejecutar un ataque de fuerza bruta contra el servicio SSH. El ataque se fundamentó en inteligencia de fuentes abiertas (OSINT) recolectada en la web y el uso táctico del diccionario masivo `rockyou.txt`.
-*   **GTFOBins:** Metodología clave aplicada para la fase de *Privilege Escalation*. Se explotó una vulnerabilidad de configuración en `sudoers` (permisos `NOPASSWD` sobre `/usr/bin/vim`), forzando un escape de la interfaz (*shell escape*) para obtener acceso interactivo total como `root`.
-*   **Análisis Manual (OSINT):** Inspección de código fuente HTML para identificar fugas de información (*Information Disclosure*) que revelaron patrones de reutilización de credenciales.
+Puerto 80: HTTP (Apache/2.4.58 en Ubuntu)
 
-## 📖 Contenido del Directorio
+Análisis Web e Inteligencia de Fuentes Abiertas (OSINT)
+Al interactuar con el servidor web, se descubrió una página de un entrenador personal ("Russoski Coaching"). Al inspeccionar manualmente el código fuente HTML (Ctrl+U), se detectó un comentario oculto dejado por el desarrollador en producción:
 
-*   `writeup.md`: El informe técnico completo que detalla las fases de Reconocimiento, Acceso Inicial, Escalada de Privilegios y las estrategias de Defensa/Mitigación recomendadas.
-*   *(Opcional) Puedes añadir aquí una carpeta `/img` si decides incluir capturas de pantalla de la intrusión.*
+HTML
+<! -- Utilizando el mismo usuario para todos mis servicios, podré recordarlo fácilmente -->
+Adicionalmente, en un enlace hacia su repositorio, se identificó una variación del nombre de usuario: russ0ski (con un cero). Esta fuga de información indicó una política de contraseñas extremadamente débil, sugiriendo la reutilización de credenciales y el uso de contraseñas idénticas al nombre de usuario.
 
-## 👨‍💻 Autor
+3. Fase de Acceso Inicial (Initial Access)
+Basado en la recolección de información, se determinaron dos posibles vectores de ataque para el servicio SSH: el usuario russ0ski y el usuario russoski.
 
-**Raúl Lozano Fernández**
-*   **Contacto:** ralofe89@gmail.com
-*   **Perfil:** Orientado a la ciberseguridad, análisis de datos y desarrollo de soluciones automatizadas.
+Ante la ineficacia de los diccionarios personalizados y las pruebas manuales iniciales, se optó por un ataque de fuerza bruta agresivo utilizando la herramienta Hydra en conjunto con el diccionario estándar rockyou.txt, el cual contiene millones de contraseñas filtradas mundialmente.
+
+Comando ejecutado:
+
+Bash
+hydra -l russoski -P /usr/share/wordlists/rockyou.txt ssh://172.17.0.3 -t 4
+Resultado:
+El ataque fue exitoso, revelando que el usuario empleaba una contraseña altamente predecible e insegura.
+
+Usuario: russoski
+
+Contraseña: iloveme
+
+Con estas credenciales, se estableció una sesión interactiva SSH exitosa en el sistema objetivo.
+
+4. Fase de Escalada de Privilegios (Privilege Escalation)
+Una vez obtenido el acceso inicial como el usuario de bajos privilegios russoski, el objetivo principal fue comprometer el sistema en su totalidad escalando a root.
+
+El primer paso en la enumeración interna fue verificar las configuraciones de sudo para el usuario actual:
+
+Bash
+sudo -l
+Salida obtenida:
+
+Plaintext
+User russoski may run the following commands on faae9a3b4c00:
+    (root) NOPASSWD: /usr/bin/vim
+Explotación (GTFOBins)
+El sistema permitía ejecutar el editor de texto Vim como administrador (root) sin necesidad de ingresar contraseña. Vim posee la funcionalidad de ejecutar comandos de la consola (shell) desde su interfaz. Al ejecutarse con privilegios elevados, cualquier shell invocada hereda dichos permisos.
+
+Para evadir problemas de interfaz interactiva dentro del editor, se aplicó un vector de ataque directo automatizado pasando el comando por argumento (-c):
+
+Bash
+sudo /usr/bin/vim -c ':!/bin/bash'
+Este comando forzó a Vim a abrir una sesión interactiva de Bash con los privilegios de quien lo ejecutó (root). Tras confirmar el acceso con el comando whoami, se procedió a capturar la bandera final ubicada en /root/root.txt.
+
+5. Medidas de Mitigación y Recomendaciones (Defensa)
+Para parchear estas vulnerabilidades en un entorno de producción, se deben aplicar las siguientes medidas de remediación:
+
+Sanitización de Código (Prevención de Information Disclosure): Implementar procesos de CI/CD que eliminen los comentarios HTML y notas de desarrollo antes de desplegar el código a producción.
+
+Políticas de Contraseñas Robustas: Auditar las credenciales del sistema para evitar el uso de claves presentes en diccionarios conocidos (como rockyou.txt) o el reciclaje de credenciales básicas. Implementar autenticación por llaves públicas (SSH Keys) y deshabilitar el acceso SSH por contraseña.
+
+Principio de Menor Privilegio (Sudoers): Nunca asignar permisos NOPASSWD a binarios que posean funciones de escape al sistema operativo (conocidos en GTFOBins como binarios con Shell escape), tales como vim, nano, tar, awk, o less. Si un usuario necesita editar archivos como root, se debe configurar el uso estricto de sudoedit en lugar del binario del editor.
